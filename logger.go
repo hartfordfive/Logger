@@ -218,13 +218,12 @@ func loadConfig(filename string, conf *Config) error {
         if string(l[0]) == "#" { continue }
         parts := strings.SplitN(strings.Trim(l," "), "=", 2)
         fmt.Println(parts)
-        if _,ok := valid[parts[0]]; ok 
+        if _,ok := valid[parts[0]]; ok {
             if parts[0] == "debug" {
-                conf.LoggerAddress = parts[1]
-            } else if parts[0] == "logger_address" {
-                fmt.Println("Part:", parts[0], ", Val:", v)
-                v,_ := strconv.Atoi(parts[1])
+                 v,_ := strconv.Atoi(parts[1])
                 conf.Debug = v
+            } else if parts[0] == "logger_address" {
+                conf.LoggerAddress = parts[1]
             } else if parts[0] == "log_directory" {
                 conf.LogDir = parts[1]
             } else if parts[0] == "num_workers" {
@@ -282,6 +281,17 @@ func main() {
         conf.StatsAddress = *addressStats
     }
 
+    // Ensure that the log directory 
+    if _, err := os.Stat(conf.LogDir); err != nil {
+        if os.IsNotExist(err) {
+            err = os.Mkdir(conf.LogDir, 0755)
+        }
+        if err != nil {
+            fmt.Println("ERROR: Could not created directory: ", conf.LogDir)
+            os.Exit(0)
+        }
+    }
+
     fmt.Println("Starting Logger on ", conf.LoggerAddress)
 
     mutexWrite = &sync.Mutex{}
@@ -298,8 +308,8 @@ func main() {
     }
 
     gracehttp.Serve(
-        &http.Server{Addr: *address, Handler: newHandler("logging_handler")},
-        &http.Server{Addr: *addressStats, Handler: statsHandler("stats_handler")},
+        &http.Server{Addr: conf.LoggerAddress, Handler: newHandler("logging_handler")},
+        &http.Server{Addr: conf.StatsAddress, Handler: statsHandler("stats_handler")},
     )
 }
 
@@ -340,7 +350,7 @@ func statsHandler(name string) http.Handler {
     mux := http.NewServeMux()
     mux.HandleFunc("/etahub-web/stats", func(w http.ResponseWriter, r *http.Request) {
         
-        stats := map[interface{}]interface{}{"status": "OK", "total_requests_serverd": 1, "current_workers": 1}
+        stats := map[string]interface{}{"status": "OK", "total_requests_serverd": 1, "current_workers": 1}
         data,err := json.Marshal(stats)
 
         w.Header().Set("Cache-control", "public, max-age=0")
