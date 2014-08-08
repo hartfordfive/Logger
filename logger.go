@@ -16,6 +16,7 @@ import (
     "io"
     "encoding/json"
     "encoding/base64"
+    "sync/atomic"
     "github.com/facebookgo/grace/gracehttp"
 )
 
@@ -44,7 +45,16 @@ type Config struct {
     EnableStats int
 }
 
+
+type Stats struct {
+    ProcessStartTime int64
+    TotalRequestsServed uint64
+    CurrentCpuUsage float32
+    CurrentProcessMemUsage int32
+}
+
 var conf = NewConfig()
+var stats = NewStats()
 
 var (
     now      = time.Now()
@@ -56,7 +66,7 @@ var (
 var debug, buffer_capacity, num_workers, enable_stats, enable_ssl int
 var logdir, configFile string
 var workers []*LogWorker
-var mutexWrite, mutexCreate *sync.Mutex
+var mutexWrite, mutexCreate, mutexIncr *sync.Mutex
 
 
 func init() {
@@ -64,9 +74,14 @@ func init() {
 }
 
 
+func NewStats() (s *Stats) {
+    return &Stats{ProcessStartTime: time.Now().Unix()}
+}
+
 func NewConfig() (c *Config) {
     return &Config{}
 }
+
 
 func Log(event []byte) {
   select {
@@ -120,9 +135,16 @@ func (w *LogWorker) ListenForLogEvent(channel chan []byte) {
     }
     copy(w.buffer[w.position:], event)
     w.position += length
+    w.UpdateStats()
   }
 }
 
+
+func (w *LogWorker) UpdateStats() {
+    mutexIncr.Lock()
+    atomic.AddUint64(&stats.TotalRequestsServed, 1)
+    mutexIncr.Unlock()
+}
 
 func (w *LogWorker) Save() {
 
@@ -296,6 +318,7 @@ func main() {
 
     mutexWrite = &sync.Mutex{}
     mutexCreate = &sync.Mutex{}
+    mutexIncr = &sync.Mutex{}
 
     workers = make([]*LogWorker, num_workers)
     for i := 0; i < num_workers; i++ {
@@ -350,7 +373,13 @@ func statsHandler(name string) http.Handler {
     mux := http.NewServeMux()
     mux.HandleFunc("/etahub-web/stats", func(w http.ResponseWriter, r *http.Request) {
         
-        stats := map[string]interface{}{"status": "OK", "total_requests_serverd": 1, "current_workers": 1}
+        stats := map[string]interface{}{
+            "status": "OK", 
+            "total_requests_serverd": stats.TotalRequestsServed, 
+            "current_workers": conf.NumWorkers,
+            "current_uptime": time.Now().Unix() - stats.ProcessStartTime,
+        }
+
         data,err := json.Marshal(stats)
 
         w.Header().Set("Cache-control", "public, max-age=0")
