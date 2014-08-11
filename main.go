@@ -469,8 +469,8 @@ func main() {
 	// Start the thread to collect the CPU stats every 5 seconds
 	//go updateCpuUsageStats()
 		
-	workers = make([]*LogWorker, num_workers)
-	for i := 0; i < num_workers; i++ {
+	workers = make([]*LogWorker, conf.NumWorkers)
+	for i := 0; i < conf.NumWorkers; i++ {
 
 		if conf.Debug == 1 {
 			fmt.Printf("Spawning log worker %d \n", i)
