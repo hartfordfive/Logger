@@ -30,8 +30,8 @@ type LogWorker struct {
 	fileRoot             string
 	buffer               []byte
 	position             int
-	currentLogFile       string
-	currentLogFileHandle *os.File
+	//currentLogFile       string
+	//currentLogFileHandle *os.File
 	requestsHandled      int64
 	currMinRequestSize   int32
 	currMaxRequestSize   int32
@@ -79,9 +79,10 @@ var (
 )
 
 var debug, buffer_capacity, num_workers, enable_stats, enable_ssl int
-var logdir, configFile string
+var logdir, configFile, currentLogFile string
 var workers []*LogWorker
 var mutexWrite, mutexCreate, mutexIncr, mutexRPS *sync.Mutex
+var currentLogFileHandle *os.File
 
 func init() {
 
@@ -105,6 +106,7 @@ func Log(event []byte) {
 
 func NewLogWorker(id int) (w *LogWorker) {
 
+	/*
 	fh, err := os.OpenFile(strings.TrimRight(logdir, "/")+"/"+getLogfileName(), os.O_RDWR|os.O_APPEND, 0660)
 	if err != nil {
 		if conf.Debug == 1 {
@@ -117,12 +119,13 @@ func NewLogWorker(id int) (w *LogWorker) {
 		}
 
 	}
+	*/
 
 	return &LogWorker{
 		fileRoot:             logdir + "/" + strconv.Itoa(id) + "_",
 		buffer:               make([]byte, conf.ByteBufferCapacity),
-		currentLogFile:       getLogfileName(),
-		currentLogFileHandle: fh,
+		//currentLogFile:       getLogfileName(),
+		//currentLogFileHandle: fh,
 	}
 }
 
@@ -212,24 +215,28 @@ func (w *LogWorker) Save() {
 		return
 	}
 
-	if getLogfileName() != w.currentLogFile {
+	/*
+	lfn := getLogfileName()
+	if lfn != w.currentLogFile {
 
 		defer w.currentLogFileHandle.Close()
 		mutexCreate.Lock()
 		if conf.Debug == 1 {
 			fmt.Println("\tCould not open file to append data, attempting to create file..")
 		}
-		fh, err := os.Create(strings.TrimRight(logdir, "/") + "/" + getLogfileName())
+		fh, err := os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + getLogfileName())
 		if err != nil {
 			fmt.Println("ERROR: Worker could not open new log file!")
 			panic(err)
 		}
 		w.currentLogFileHandle = fh
 		defer w.currentLogFileHandle.Close()
+		w.currentLogFile = lfn
 		mutexCreate.Unlock()
 		runtime.Gosched()
 
 	}
+	*/
 
 	// close fo on exit and check for its returned error
 	/*
@@ -246,11 +253,33 @@ func (w *LogWorker) Save() {
 	w.position = 0
 }
 
-func (w *LogWorker) FileWritter(pending_write_channel chan LogEntry) {
+func FileWritter(pending_write_channel chan LogEntry) {
+
+	lfn := getLogfileName()
+	if lfn != currentLogFile {
+
+		defer currentLogFileHandle.Close()
+		mutexCreate.Lock()
+		if conf.Debug == 1 {
+			fmt.Println("\tCould not open file to append data, attempting to create file..")
+		}
+		fh, err := os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + getLogfileName())
+		if err != nil {
+			fmt.Println("ERROR: Worker could not open new log file!")
+			panic(err)
+		}
+		currentLogFileHandle = fh
+		defer currentLogFileHandle.Close()
+		currentLogFile = lfn
+		mutexCreate.Unlock()
+		runtime.Gosched()
+
+	}
+
 	mutexWrite.Lock()
 	data := <-pending_write_channel
-	w.currentLogFileHandle.Write(data)
-	w.currentLogFileHandle.Sync()
+	currentLogFileHandle.Write(data)
+	currentLogFileHandle.Sync()
 	mutexWrite.Unlock()
 	runtime.Gosched()
 }
@@ -380,7 +409,6 @@ func getUuidCookie(r *http.Request) string {
 	return uuid
 }
 
-
 func updateCpuUsageStats(stats *Stats) {
 
 	var prev_cpu_total uint64
@@ -488,6 +516,19 @@ func main() {
 	// Start the thread to collect the CPU stats every 5 seconds
 	//go updateCpuUsageStats()
 
+	currentLogFileHandle, err := os.OpenFile(strings.TrimRight(conf.LogDir, "/")+"/"+getLogfileName(), os.O_RDWR|os.O_APPEND, 0660)
+	if err != nil {
+		if conf.Debug == 1 {
+			fmt.Println("\tCould not open file to append data, attempting to create file..")
+		}
+		currentLogFileHandle, err = os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + getLogfileName())
+		if err != nil {
+			fmt.Println("Worker could not open log file! :")
+			panic(err)
+		}
+
+	}
+
 	workers = make([]*LogWorker, conf.NumWorkers)
 	for i := 0; i < conf.NumWorkers; i++ {
 
@@ -496,9 +537,9 @@ func main() {
 		}
 		workers[i] = NewLogWorker(i)
 
-		defer workers[i].currentLogFileHandle.Close()
+		defer currentLogFileHandle.Close()
 		go workers[i].ListenForLogEvent(channel)
-		go workers[i].FileWritter(pending_write_channel)
+		go FileWritter(pending_write_channel)
 		go workers[i].UpdateRPS()
 	}
 
