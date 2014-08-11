@@ -477,7 +477,6 @@ func newHandler(name string) http.Handler {
 		udid := ""
 		// If the _golog_uuid cookie is not set, then create the uuid and set it
 		cookie := r.Header.Get("Cookie")
-		fmt.Println("Cookie:", cookie)
 
 		if cookie != "" && udid == "" {
 			cookies := strings.Split(cookie, "; ")
