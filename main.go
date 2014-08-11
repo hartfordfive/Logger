@@ -64,12 +64,16 @@ type Stats struct {
 	CpuUsagePercentage		float32
 }
 
+type LogEntry []byte
+
+
 var conf = NewConfig()
 var stats = NewStats()
 
 var (
 	now          = time.Now()
 	channel      = make(chan []byte, 6144) // 6144-1 number of log events can be in the channel before it blocks
+	pending_write_channel      = make(chan LogEntry, 10000) // 6144-1 number of log events can be in the channel before it blocks
 	address      = flag.String("a", "0.0.0.0:80", "Address to listen on for logging")
 	addressStats = flag.String("r", "0.0.0.0:88", "Address to listen on for stats")
 )
@@ -228,14 +232,29 @@ func (w *LogWorker) Save() {
 	}
 
 	// close fo on exit and check for its returned error
+	/*
 	mutexWrite.Lock()
 	w.currentLogFileHandle.Write(w.buffer[0:w.position])
 	w.currentLogFileHandle.Sync()
 	mutexWrite.Unlock()
-
+	*/
+	// Send the buffer on the channel to be written
+	select {
+		case pending_write_channel <- w.buffer[0:w.position]:
+	}
+	// Reset the position of the worker's buffer to 0
 	w.position = 0
+}
+
+func (w *LogWorker) FileWritter(pending_write_channel chan LogEntry) {
+	mutexWrite.Lock()
+	data := <-pending_write_channel
+	w.currentLogFileHandle.Write(data)
+	w.currentLogFileHandle.Sync()
+	mutexWrite.Unlock()
 	runtime.Gosched()
 }
+
 
 /************************************************************/
 
@@ -468,7 +487,7 @@ func main() {
 
 	// Start the thread to collect the CPU stats every 5 seconds
 	//go updateCpuUsageStats()
-		
+
 	workers = make([]*LogWorker, conf.NumWorkers)
 	for i := 0; i < conf.NumWorkers; i++ {
 
@@ -479,6 +498,7 @@ func main() {
 
 		defer workers[i].currentLogFileHandle.Close()
 		go workers[i].ListenForLogEvent(channel)
+		go workers[i].FileWritter(pending_write_channel)
 		go workers[i].UpdateRPS()
 	}
 
