@@ -59,6 +59,7 @@ type Stats struct {
 	Timer                  *time.Timer
 	PrevRequestsServed     uint64
 	RPS                    int32
+	CpuUsagePercentage		float32
 }
 
 var conf = NewConfig()
@@ -274,7 +275,7 @@ func loadConfig(filename string, conf *Config) error {
 	valid := map[string]int{
 		"debug": 1, "logger_address": 1, "log_directory": 1, "num_workers": 1,
 		"buffer_capacity": 1, "enable_ssl": 1, "enable_stats": 1, "stats_address": 1,
-		"cookie_domain": 1,
+		"cookie_domain": 1, "dump_to_graphite": 1, "graphite_host": 1, "graphite_port": 1,
 	}
 
 	buf := bytes.NewBuffer(nil)
@@ -354,7 +355,6 @@ func main() {
 		if err != nil {
 			panic("ERROR: Please verify that configuration file is valid")
 		}
-
 	} else {
 		conf.LoggerAddress = *address
 		conf.Debug = debug
@@ -386,6 +386,13 @@ func main() {
 
 	// Start the thread to collect the CPU stats every 5 seconds
 	go func() {
+		
+		var prev_cpu_total uint64
+		var prev_cpu_idle	uint64
+		var diff_idle uint64
+		var diff_total uint64
+		var diff_usage float32
+
 		for {
 			stat, err := linuxproc.ReadStat("/proc/stat")
 			if err != nil {
@@ -396,23 +403,38 @@ func main() {
 				continue
 			}
 			//s := stat.CPUStats
-			for i, s := range stat.CPUStats {
-				switch i {
-				case 0:
-					stats.CpuStats["User"] = s.User
-				case 1:
-					stats.CpuStats["Nice"] = s.Nice
-				case 2:
-					stats.CpuStats["System"] = s.System
-				case 3:
-					stats.CpuStats["Idle"] = s.Idle
-				case 4:
-					stats.CpuStats["User"] = s.IOWait
-				}
-			}
 
-			//fmt.Println("CPU Stats:", s)
-			time.Sleep(5 * time.Second)
+			/*
+			The meanings of the columns are as follows, from left to right:
+
+			- user: normal processes executing in user mode
+			- nice: niced processes executing in user mode
+			- system: processes executing in kernel mode
+			- idle: twiddling thumbs
+			- iowait: waiting for I/O to complete
+			- irq: servicing interrupts
+			- softirq: servicing softirqs
+			- steal: involuntary wait
+			- guest: running a normal guest
+			- guest_nice: running a niced gues
+
+				Calculating CPU usage:
+				CPU_Percentage = ( (Total-PrevTotal) - (Idle-PrevIdle) ) / (Total-PrevTotal)
+			*/
+
+			prev_cpu_idle = stat.CPUStatAll.Idle
+			prev_cpu_total = stat.CPUStatAll.User + stat.CPUStatAll.Nice +  stat.CPUStatAll.System + stat.CPUStatAll.Idle + stat.CPUStatAll.IOWait + stat.CPUStatAll.IRQ + stat.CPUStatAll.SoftIRQ + stat.CPUStatAll.Steal 
+
+			time.Sleep(1 * time.Second)
+
+			stat, err = linuxproc.ReadStat("/proc/stat")
+			diff_idle = stat.CPUStatAll.Idle - prev_cpu_idle
+			diff_total = (stat.CPUStatAll.User + stat.CPUStatAll.Nice +  stat.CPUStatAll.System + stat.CPUStatAll.Idle + stat.CPUStatAll.IOWait + stat.CPUStatAll.IRQ + stat.CPUStatAll.SoftIRQ + stat.CPUStatAll.Steal) - prev_cpu_total
+			diff_usage =  float32(100 * (diff_total - diff_idle) / diff_total)
+
+
+			//stats.CpuUsagePercentage = float32(( (curr_cpu_total-prev_cpu_total) - (stat.CPUStatAll.Idle - prev_cpu_idle) ) / (curr_cpu_total-prev_cpu_total))
+			stats.CpuUsagePercentage = diff_usage
 		}
 	}()
 
@@ -502,6 +524,7 @@ func statsHandler(name string) http.Handler {
 			"memory_usage":           0,
 			"current_logfile":        getLogfileName(),
 			"current_rps":            stats.RPS,
+			"current_cpu_usage":		stats.CpuUsagePercentage,
 			"curr_max_request_size":  stats.CurrMaxRequestSize,
 			"curr_min_request_size":  stats.CurrMinRequestSize,
 		}
