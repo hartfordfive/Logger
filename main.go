@@ -129,7 +129,7 @@ func NewLogWorker(id int) (w *LogWorker) {
 	}
 }
 
-func (w *LogWorker) ListenForLogEvent(channel chan []byte) {
+func (w *LogWorker) ListenForLogEvent(channel chan []byte, pending_write_channel chan LogEntry) {
 	for {
 		event := <-channel
 		length := len(event)
@@ -165,7 +165,7 @@ func (w *LogWorker) ListenForLogEvent(channel chan []byte) {
 			if conf.Debug == 1 {
 				fmt.Println("Dumping buffer to file to file!")
 			}
-			w.Save()
+			w.Save(pending_write_channel)
 		}
 		copy(w.buffer[w.position:], event)
 		w.position += length
@@ -209,7 +209,7 @@ func (w *LogWorker) UpdateStats() {
 	runtime.Gosched()
 }
 
-func (w *LogWorker) Save() {
+func (w *LogWorker) Save(pending_write_channel chan LogEntry) {
 
 	if w.position == 0 {
 		return
@@ -246,42 +246,43 @@ func (w *LogWorker) Save() {
 	mutexWrite.Unlock()
 	*/
 	// Send the buffer on the channel to be written
-	select {
-		case pending_write_channel <- w.buffer[0:w.position]:
-	}
+	pending_write_channel <- w.buffer[0:w.position]
+
 	// Reset the position of the worker's buffer to 0
 	w.position = 0
 }
 
 func FileWritter(pending_write_channel chan LogEntry) {
 
-	lfn := getLogfileName()
-	if lfn != currentLogFile {
+	for {
+		lfn := getLogfileName()
+		if lfn != currentLogFile {
 
-		defer currentLogFileHandle.Close()
-		mutexCreate.Lock()
-		if conf.Debug == 1 {
-			fmt.Println("\tCould not open file to append data, attempting to create file..")
+			defer currentLogFileHandle.Close()
+			mutexCreate.Lock()
+			if conf.Debug == 1 {
+				fmt.Println("\tCould not open file to append data, attempting to create file..")
+			}
+			fh, err := os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + getLogfileName())
+			if err != nil {
+				fmt.Println("ERROR: Worker could not open new log file!")
+				panic(err)
+			}
+			currentLogFileHandle = fh
+			defer currentLogFileHandle.Close()
+			currentLogFile = lfn
+			mutexCreate.Unlock()
+			runtime.Gosched()
+
 		}
-		fh, err := os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + getLogfileName())
-		if err != nil {
-			fmt.Println("ERROR: Worker could not open new log file!")
-			panic(err)
-		}
-		currentLogFileHandle = fh
-		defer currentLogFileHandle.Close()
-		currentLogFile = lfn
-		mutexCreate.Unlock()
+
+		mutexWrite.Lock()
+		data := <-pending_write_channel
+		currentLogFileHandle.Write(data)
+		currentLogFileHandle.Sync()
+		mutexWrite.Unlock()
 		runtime.Gosched()
-
 	}
-
-	mutexWrite.Lock()
-	data := <-pending_write_channel
-	currentLogFileHandle.Write(data)
-	currentLogFileHandle.Sync()
-	mutexWrite.Unlock()
-	runtime.Gosched()
 }
 
 
@@ -539,7 +540,7 @@ func main() {
 		workers[i] = NewLogWorker(i)
 
 		defer currentLogFileHandle.Close()
-		go workers[i].ListenForLogEvent(channel)
+		go workers[i].ListenForLogEvent(channel, pending_write_channel)
 		go FileWritter(pending_write_channel)
 		go workers[i].UpdateRPS()
 	}
