@@ -47,6 +47,7 @@ type Config struct {
 	EnableSSL          int
 	EnableStats        int
 	CookieDomain       string
+	GenerateUDID		int
 }
 
 type Stats struct {
@@ -180,6 +181,7 @@ func (w *LogWorker) UpdateRPS() {
 		time.Sleep(1 * time.Second)
 		stats.RPS = int32(stats.TotalRequestsServed - stats.PrevRequestsServed)
 		mutexRPS.Unlock()
+		runtime.Gosched()
 	}
 
 }
@@ -197,6 +199,7 @@ func (w *LogWorker) UpdateStats() {
 	}
 
 	mutexIncr.Unlock()
+	runtime.Gosched()
 }
 
 func (w *LogWorker) Save() {
@@ -220,6 +223,7 @@ func (w *LogWorker) Save() {
 		w.currentLogFileHandle = fh
 		defer w.currentLogFileHandle.Close()
 		mutexCreate.Unlock()
+		runtime.Gosched()
 
 	}
 
@@ -274,7 +278,7 @@ func getLogfileName() string {
 func loadConfig(filename string, conf *Config) error {
 
 	valid := map[string]int{
-		"debug": 1, "logger_address": 1, "log_directory": 1, "num_workers": 1,
+		"debug": 1, "logger_address": 1, "log_directory": 1, "num_workers": 1, "generate_udid": 1,
 		"buffer_capacity": 1, "enable_ssl": 1, "enable_stats": 1, "stats_address": 1,
 		"cookie_domain": 1, "dump_to_graphite": 1, "graphite_host": 1, "graphite_port": 1,
 	}
@@ -319,6 +323,9 @@ func loadConfig(filename string, conf *Config) error {
 				conf.StatsAddress = parts[1]
 			} else if parts[0] == "cookie_domain" {
 				conf.CookieDomain = parts[1]
+			} else if parts[0] == "generate_udid" {
+				v, _ := strconv.Atoi(parts[1])
+				conf.GenerateUDID = v
 			}
 		}
 	}
@@ -335,6 +342,77 @@ func getUDID() string {
 	return uuid
 	*/
 	return uuid.NewUUID().String()
+}
+
+func getUuidCookie(r *http.Request) string {
+	var uuid string
+	cookie := r.Header.Get("Cookie")
+	if cookie != "" {
+		cookies := strings.Split(cookie, "; ")
+		for i := 0; i < len(cookies); i++ {
+			parts := strings.Split(cookies[i], "=")
+			if parts[0] == "udid" {
+				uuid = parts[1]
+				break
+			}
+		}
+		// If the cookie isn't found, then generate a udid and then send the cookie
+	}
+	return uuid
+}
+
+
+func updateCpuUsageStats(stats *Stats) {
+
+	var prev_cpu_total uint64
+	var prev_cpu_idle	uint64
+	var diff_idle uint64
+	var diff_total uint64
+	var diff_usage float32
+
+	for {
+		stat, err := linuxproc.ReadStat("/proc/stat")
+		if err != nil {
+			if conf.Debug == 1 {
+				fmt.Println("LINUXPROC ERROR: stat read fail")
+			}
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		//s := stat.CPUStats
+
+		/*
+		The meanings of the columns are as follows, from left to right:
+
+		- user: normal processes executing in user mode
+		- nice: niced processes executing in user mode
+		- system: processes executing in kernel mode
+		- idle: twiddling thumbs
+		- iowait: waiting for I/O to complete
+		- irq: servicing interrupts
+		- softirq: servicing softirqs
+		- steal: involuntary wait
+		- guest: running a normal guest
+		- guest_nice: running a niced gues
+
+			Calculating CPU usage:
+			CPU_Percentage = ( (Total-PrevTotal) - (Idle-PrevIdle) ) / (Total-PrevTotal)
+		*/
+
+		prev_cpu_idle = stat.CPUStatAll.Idle
+		prev_cpu_total = stat.CPUStatAll.User + stat.CPUStatAll.Nice +  stat.CPUStatAll.System + stat.CPUStatAll.Idle + stat.CPUStatAll.IOWait + stat.CPUStatAll.IRQ + stat.CPUStatAll.SoftIRQ + stat.CPUStatAll.Steal 
+
+		time.Sleep(1 * time.Second)
+
+		stat, err = linuxproc.ReadStat("/proc/stat")
+		diff_idle = stat.CPUStatAll.Idle - prev_cpu_idle
+		diff_total = (stat.CPUStatAll.User + stat.CPUStatAll.Nice +  stat.CPUStatAll.System + stat.CPUStatAll.Idle + stat.CPUStatAll.IOWait + stat.CPUStatAll.IRQ + stat.CPUStatAll.SoftIRQ + stat.CPUStatAll.Steal) - prev_cpu_total
+		diff_usage =  float32(100 * (diff_total - diff_idle) / diff_total)
+
+
+		//stats.CpuUsagePercentage = float32(( (curr_cpu_total-prev_cpu_total) - (stat.CPUStatAll.Idle - prev_cpu_idle) ) / (curr_cpu_total-prev_cpu_total))
+		stats.CpuUsagePercentage = diff_usage
+	}
 }
 
 /****************************************************************/
@@ -389,63 +467,12 @@ func main() {
 	mutexRPS = &sync.Mutex{}
 
 	// Start the thread to collect the CPU stats every 5 seconds
-	go func() {
+	//go updateCpuUsageStats()
 		
-		var prev_cpu_total uint64
-		var prev_cpu_idle	uint64
-		var diff_idle uint64
-		var diff_total uint64
-		var diff_usage float32
-
-		for {
-			stat, err := linuxproc.ReadStat("/proc/stat")
-			if err != nil {
-				if debug == 1 {
-					fmt.Println("LINUXPROC ERROR: stat read fail")
-				}
-				time.Sleep(5 * time.Second)
-				continue
-			}
-			//s := stat.CPUStats
-
-			/*
-			The meanings of the columns are as follows, from left to right:
-
-			- user: normal processes executing in user mode
-			- nice: niced processes executing in user mode
-			- system: processes executing in kernel mode
-			- idle: twiddling thumbs
-			- iowait: waiting for I/O to complete
-			- irq: servicing interrupts
-			- softirq: servicing softirqs
-			- steal: involuntary wait
-			- guest: running a normal guest
-			- guest_nice: running a niced gues
-
-				Calculating CPU usage:
-				CPU_Percentage = ( (Total-PrevTotal) - (Idle-PrevIdle) ) / (Total-PrevTotal)
-			*/
-
-			prev_cpu_idle = stat.CPUStatAll.Idle
-			prev_cpu_total = stat.CPUStatAll.User + stat.CPUStatAll.Nice +  stat.CPUStatAll.System + stat.CPUStatAll.Idle + stat.CPUStatAll.IOWait + stat.CPUStatAll.IRQ + stat.CPUStatAll.SoftIRQ + stat.CPUStatAll.Steal 
-
-			time.Sleep(1 * time.Second)
-
-			stat, err = linuxproc.ReadStat("/proc/stat")
-			diff_idle = stat.CPUStatAll.Idle - prev_cpu_idle
-			diff_total = (stat.CPUStatAll.User + stat.CPUStatAll.Nice +  stat.CPUStatAll.System + stat.CPUStatAll.Idle + stat.CPUStatAll.IOWait + stat.CPUStatAll.IRQ + stat.CPUStatAll.SoftIRQ + stat.CPUStatAll.Steal) - prev_cpu_total
-			diff_usage =  float32(100 * (diff_total - diff_idle) / diff_total)
-
-
-			//stats.CpuUsagePercentage = float32(( (curr_cpu_total-prev_cpu_total) - (stat.CPUStatAll.Idle - prev_cpu_idle) ) / (curr_cpu_total-prev_cpu_total))
-			stats.CpuUsagePercentage = diff_usage
-		}
-	}()
-
 	workers = make([]*LogWorker, num_workers)
 	for i := 0; i < num_workers; i++ {
 
-		if debug == 1 {
+		if conf.Debug == 1 {
 			fmt.Printf("Spawning log worker %d \n", i)
 		}
 		workers[i] = NewLogWorker(i)
@@ -478,26 +505,15 @@ func newHandler(name string) http.Handler {
 		data := r.URL.Query().Get("data")
 		requestIP := r.RemoteAddr
 
-		udid := ""
 		// If the _golog_uuid cookie is not set, then create the uuid and set it
-		cookie := r.Header.Get("Cookie")
-
-		if cookie != "" && udid == "" {
-			cookies := strings.Split(cookie, "; ")
-			for i := 0; i < len(cookies); i++ {
-				parts := strings.Split(cookies[i], "=")
-				if parts[0] == "udid" {
-					udid = parts[1]
-					break
-				}
+		var udid string
+		if conf.GenerateUDID == 1 {
+			udid := getUuidCookie(r)
+			if udid == "" {
+				y, m, d := time.Now().Date()
+				expiryTime := time.Date(y, m, d+365, 0, 0, 0, 0, time.UTC)
+				w.Header().Set("Set-Cookie", "udid="+getUDID()+"; Domain="+conf.CookieDomain+"; Path=/; Expires="+expiryTime.Format(time.RFC1123))
 			}
-			// If the cookie isn't found, then generate a udid and then send the cookie
-		}
-
-		if udid == "" {
-			y, m, d := time.Now().Date()
-			expiryTime := time.Date(y, m, d+365, 0, 0, 0, 0, time.UTC)
-			w.Header().Set("Set-Cookie", "udid="+getUDID()+"; Domain="+conf.CookieDomain+"; Path=/; Expires="+expiryTime.Format(time.RFC1123))
 		}
 
 		ts := int(time.Now().Unix())
