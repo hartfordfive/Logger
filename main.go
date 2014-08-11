@@ -516,6 +516,7 @@ func main() {
 	// Start the thread to collect the CPU stats every 5 seconds
 	//go updateCpuUsageStats()
 
+	currentLogFile = getLogfileName()
 	currentLogFileHandle, err := os.OpenFile(strings.TrimRight(conf.LogDir, "/")+"/"+getLogfileName(), os.O_RDWR|os.O_APPEND, 0660)
 	if err != nil {
 		if conf.Debug == 1 {
