@@ -9,6 +9,7 @@ import (
 	"fmt"
 	linuxproc "github.com/c9s/goprocinfo/linux"
 	"github.com/facebookgo/grace/gracehttp"
+	uuid "code.google.com/p/go-uuid/uuid"
 	"io"
 	"log"
 	"net/http"
@@ -325,12 +326,15 @@ func loadConfig(filename string, conf *Config) error {
 }
 
 func getUDID() string {
+	/*
 	f, _ := os.Open("/dev/urandom")
 	b := make([]byte, 16)
 	f.Read(b)
 	f.Close()
 	uuid := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 	return uuid
+	*/
+	return uuid.NewUUID().String()
 }
 
 /****************************************************************/
