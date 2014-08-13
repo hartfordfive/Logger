@@ -11,7 +11,7 @@ import (
 	"github.com/facebookgo/grace/gracehttp"
 	uuid "code.google.com/p/go-uuid/uuid"
 	"io"
-	"log"
+	//"log"
 	"net/http"
 	"os"
 	"runtime"
@@ -71,8 +71,8 @@ var stats = NewStats()
 
 var (
 	now          = time.Now()
-	channel      = make(chan []byte, 6144) // 6144-1 number of log events can be in the channel before it blocks
-	pending_write_channel      = make(chan LogEntry, 10000) // 10000-1 number of pending write events can be in the channel before it blocks
+	channel      = make(chan []byte, 15000) // 6144-1 number of log events can be in the channel before it blocks
+	pending_write_channel      = make(chan LogEntry, 15000) // 10000-1 number of pending write events can be in the channel before it blocks
 	address      = flag.String("a", "0.0.0.0:80", "Address to listen on for logging")
 	addressStats = flag.String("r", "0.0.0.0:88", "Address to listen on for stats")
 )
@@ -116,7 +116,7 @@ func (w *LogWorker) ListenForLogEvent(channel chan []byte, pending_write_channel
 		length := len(event)
 
 		if conf.Debug > 1 {
-			fmt.Println("\tRequest length:", length)
+			fmt.Println(DateStampAsString(), "Request length:", length)
 		}
 
 		if w.currMinRequestSize == 0 {
@@ -134,17 +134,17 @@ func (w *LogWorker) ListenForLogEvent(channel chan []byte, pending_write_channel
 		// we run with nginx's client_max_body_size set to 2K which makes this
 		// unlikely to happen, but, just in case...
 		if length > conf.ByteBufferCapacity {
-			log.Println("message received was too large")
+			fmt.Println(DateStampAsString(), "message received was too large")
 			continue
 		}
 
 		if conf.Debug == 1 {
-			fmt.Println("Msg length: ", length, ", Position: ", w.position, ", Capacity: ", conf.ByteBufferCapacity)
+			fmt.Println(DateStampAsString(), "Msg length: ", length, ", Position: ", w.position, ", Capacity: ", conf.ByteBufferCapacity)
 		}
 
 		if (length + w.position) > conf.ByteBufferCapacity {
 			if conf.Debug == 1 {
-				fmt.Println("Dumping buffer to file!")
+				fmt.Println(DateStampAsString(), "Dumping buffer to file!")
 			}
 			w.Save(pending_write_channel)
 		}
@@ -207,11 +207,11 @@ func FileWritter(pending_write_channel chan LogEntry) {
 			//defer currentLogFileHandle.Close()
 			mutexCreate.Lock()
 			if conf.Debug == 1 {
-				fmt.Println("\tCould not open file to append data, attempting to create file..")
+				fmt.Println(DateStampAsString(), "Could not open file to append data, attempting to create file..")
 			}
 			fh, err := os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + getLogfileName())
 			if err != nil {
-				fmt.Println("ERROR: Worker could not open new log file!")
+				fmt.Println(DateStampAsString(), "ERROR: Worker could not open new log file!")
 				panic(err)
 			}
 
@@ -223,20 +223,22 @@ func FileWritter(pending_write_channel chan LogEntry) {
 
 		}
 
-		mutexWrite.Lock()
 		data := <-pending_write_channel
 
+		mutexWrite.Lock()
 		nb,err := conf.CurrentLogFileHandle.Write([]byte(data))
+		
 		if conf.Debug == 1 {
 		   if err != nil {
-		      fmt.Println("Write error:", err)
+		      fmt.Println(DateStampAsString(), "Write error:", err)
 		   }
-           fmt.Println("Wrote ", nb , " bytes to ", conf.CurrentLogFile)
+           fmt.Println(DateStampAsString(), "Wrote ", nb , " bytes to ", conf.CurrentLogFile)
         }
+
 		if err == nil {
 		   sync_err := conf.CurrentLogFileHandle.Sync()
 		   if sync_err != nil && conf.Debug == 1 {
-		      fmt.Println("Sync ERROR:", sync_err)
+		      fmt.Println(DateStampAsString(), "Sync ERROR:", sync_err)
 		   }
 		} 
 
@@ -423,6 +425,16 @@ func updateCpuUsageStats(stats *Stats) {
 	}
 }
 
+func YmdToString() string {
+	t := time.Now()
+	y,m,d := t.Date()
+	return strconv.Itoa(y)+fmt.Sprintf("%02d", m)+fmt.Sprintf("%02d",d)
+}
+func DateStampAsString() string{
+	t := time.Now()
+	return "[" + YmdToString() + " " + fmt.Sprintf("%02d", t.Hour()) + ":" + fmt.Sprintf("%02d", t.Minute()) + ":" + fmt.Sprintf("%02d", t.Second()) + "]"
+}
+
 /****************************************************************/
 
 func main() {
@@ -430,7 +442,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	flag.StringVar(&configFile, "c", "logger.conf", "Load configs from specified config")
-	flag.IntVar(&debug, "v", 0, "Start in verbose mode (debug)")
+	flag.IntVar(&debug, "v", 0, "Start in fmt.Println mode (debug)")
 	flag.StringVar(&logdir, "d", "logs", "Directory to dump log files")
 	flag.IntVar(&num_workers, "w", 4, "Number of logging workers")
 	flag.IntVar(&buffer_capacity, "n", 4096, "Event buffer size")
@@ -440,7 +452,7 @@ func main() {
 
 	// Read the config file
 	if configFile != "" {
-		fmt.Println("Loading config!")
+		fmt.Println(DateStampAsString(), "Loading config!")
 		err := loadConfig(configFile, conf)
 		if err != nil {
 			panic("ERROR: Please verify that configuration file is valid")
@@ -462,12 +474,12 @@ func main() {
 			err = os.Mkdir(conf.LogDir, 0755)
 		}
 		if err != nil {
-			fmt.Println("ERROR: Could not created directory: ", conf.LogDir)
+			fmt.Println(DateStampAsString(), "ERROR: Could not created directory: ", conf.LogDir)
 			os.Exit(0)
 		}
 	}
 
-	fmt.Println("Starting Logger on ", conf.LoggerAddress)
+	fmt.Println(DateStampAsString(), "Starting Logger on ", conf.LoggerAddress)
 
 	mutexWrite = &sync.Mutex{}
 	mutexCreate = &sync.Mutex{}
@@ -485,7 +497,7 @@ func main() {
 		}
 		fh, err = os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + getLogfileName())
 		if err != nil {
-			fmt.Println("Worker could not open log file! :")
+			fmt.Println(DateStampAsString(), "Worker could not open log file! :")
 			panic(err)
 		}
 
@@ -495,15 +507,19 @@ func main() {
 	conf.CurrentLogFile = getLogfileName()
 
 	workers = make([]*LogWorker, conf.NumWorkers)
+	
+
+	go FileWritter(pending_write_channel)
+
 	for i := 0; i < conf.NumWorkers; i++ {
 
 		if conf.Debug == 1 {
-			fmt.Printf("Spawning log worker %d \n", i)
+			fmt.Println(DateStampAsString(), "Spawning log worker ", i)
 		}
 		workers[i] = NewLogWorker(i)
 
 		go workers[i].ListenForLogEvent(channel, pending_write_channel)
-		go FileWritter(pending_write_channel)
+		//go FileWritter(pending_write_channel)
 		go workers[i].UpdateRPS()
 	}
 
