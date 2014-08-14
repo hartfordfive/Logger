@@ -11,7 +11,6 @@ import (
 	"github.com/facebookgo/grace/gracehttp"
 	uuid "code.google.com/p/go-uuid/uuid"
 	"io"
-	//"log"
 	"net/http"
 	"os"
 	"runtime"
@@ -48,6 +47,7 @@ type Config struct {
 	GenerateUDID		int
 	CurrentLogFileHandle *os.File
 	CurrentLogFile	    string
+	ForceFsync      int
 }
 
 type Stats struct {
@@ -235,7 +235,7 @@ func FileWritter(pending_write_channel chan LogEntry) {
            fmt.Println(DateStampAsString(), "Wrote ", nb , " bytes to ", conf.CurrentLogFile)
         }
 
-		if err == nil {
+		if conf.ForceFsync == 1 && err == nil {
 		   sync_err := conf.CurrentLogFileHandle.Sync()
 		   if sync_err != nil && conf.Debug == 1 {
 		      fmt.Println(DateStampAsString(), "Sync ERROR:", sync_err)
@@ -291,7 +291,7 @@ func loadConfig(filename string, conf *Config) error {
 	valid := map[string]int{
 		"debug": 1, "logger_address": 1, "log_directory": 1, "num_workers": 1, "generate_udid": 1,
 		"buffer_capacity": 1, "enable_ssl": 1, "enable_stats": 1, "stats_address": 1,
-		"cookie_domain": 1, "dump_to_graphite": 1, "graphite_host": 1, "graphite_port": 1,
+		"cookie_domain": 1, "dump_to_graphite": 1, "graphite_host": 1, "graphite_port": 1, "force_fsync": 1,
 	}
 
 	buf := bytes.NewBuffer(nil)
@@ -337,6 +337,9 @@ func loadConfig(filename string, conf *Config) error {
 			} else if parts[0] == "generate_udid" {
 				v, _ := strconv.Atoi(parts[1])
 				conf.GenerateUDID = v
+			} else if parts[0] == "force_fsync" {
+				v, _ := strconv.Atoi(parts[1])
+				conf.ForceFsync = v
 			}
 		}
 	}
