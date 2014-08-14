@@ -9,12 +9,10 @@ A simple Go based logging tool for HTTP requests
 
 ##Installation
 
-`
-$ sudo apt-get install golang
-$ git clone https://github.com/MindGeekOSS/Logger.git
-$ go get github.com/facebookgo/grace
-$ go build logger.go
-`
+- `$ sudo apt-get install golang`
+- `$ git clone https://github.com/MindGeekOSS/Logger.git`
+- `$ go get github.com/facebookgo/grace`
+- `$ go build logger.go`
 
 ## Starting the process
 
@@ -84,11 +82,16 @@ Note that although they are not yet configurable, the log event and pending writ
 
 ## Acknowledgements 
 
-Parts of this project were influenced by someof Karl Seguin's work.
+Parts of this project were influenced by some of Karl Seguin's work relating to concurency in Go.
 Special thanks to Scott Cameron for feedback and advice related system kernel tuning and load testing.
 
 
 ## Creator
 
 Alain Lefebvre
+
+
+## License
+
+Copyright 2014 MindGeek, Inc.
 
