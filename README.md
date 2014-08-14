@@ -88,10 +88,11 @@ Special thanks to Scott Cameron for feedback and advice related system kernel tu
 
 ## Creator
 
-Alain Lefebvre
+Alain Lefebvre <alain.lefebvre 'at' mindgeek.com>
 
 
 ## License
 
 Copyright 2014 MindGeek, Inc.
 
+Covered under the GNU GPL v3.0 lisense.
