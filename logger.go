@@ -71,8 +71,8 @@ var stats = NewStats()
 
 var (
 	now          = time.Now()
-	channel      = make(chan []byte, 15000) // 6144-1 number of log events can be in the channel before it blocks
-	pending_write_channel      = make(chan LogEntry, 15000) // 10000-1 number of pending write events can be in the channel before it blocks
+	channel      = make(chan []byte, 10000) // 6144-1 number of log events can be in the channel before it blocks
+	pending_write_channel      = make(chan LogEntry, 10000) // 10000-1 number of pending write events can be in the channel before it blocks
 	address      = flag.String("a", "0.0.0.0:80", "Address to listen on for logging")
 	addressStats = flag.String("r", "0.0.0.0:88", "Address to listen on for stats")
 )
@@ -313,6 +313,10 @@ func loadConfig(filename string, conf *Config) error {
 		if _, ok := valid[parts[0]]; ok {
 			if parts[0] == "debug" {
 				v, _ := strconv.Atoi(parts[1])
+				if v < 0 || v > 1 {
+					fmt.Println(DateStampAsString(), "Config ERROR: debug can only be 0 or 1")
+					os.Exit(1)
+				}
 				conf.Debug = v
 			} else if parts[0] == "logger_address" {
 				conf.LoggerAddress = parts[1]
@@ -320,15 +324,31 @@ func loadConfig(filename string, conf *Config) error {
 				conf.LogDir = parts[1]
 			} else if parts[0] == "num_workers" {
 				v, _ := strconv.Atoi(parts[1])
+				if v < 4 {
+					fmt.Println(DateStampAsString(), "Config ERROR: num_workers must be >= 4")
+					os.Exit(1)
+				} 
 				conf.NumWorkers = v
 			} else if parts[0] == "buffer_capacity" {
 				v, _ := strconv.Atoi(parts[1])
+				if v < 256 {
+					fmt.Println(DateStampAsString(), "Config ERROR: buffer_capacity must be >= 256")
+					os.Exit(1)
+				} 
 				conf.ByteBufferCapacity = v
 			} else if parts[0] == "enable_ssl" {
 				v, _ := strconv.Atoi(parts[1])
+				if v != 0 && v != 1 {
+					fmt.Println(DateStampAsString(), "Config ERROR: enable_ssl must be 0 or 1")
+					os.Exit(1)
+				} 
 				conf.EnableSSL = v
 			} else if parts[0] == "enable_stats" {
 				v, _ := strconv.Atoi(parts[1])
+				if v != 0 && v != 1 {
+					fmt.Println(DateStampAsString(), "Config ERROR: enable_stats must be 0 or 1")
+					os.Exit(1)
+				} 
 				conf.EnableStats = v
 			} else if parts[0] == "stats_address" {
 				conf.StatsAddress = parts[1]
@@ -336,9 +356,17 @@ func loadConfig(filename string, conf *Config) error {
 				conf.CookieDomain = parts[1]
 			} else if parts[0] == "generate_udid" {
 				v, _ := strconv.Atoi(parts[1])
+				if v != 0 && v != 1 {
+					fmt.Println(DateStampAsString(), "Config ERROR: generate_udid must be 0 or 1")
+					os.Exit(1)
+				} 
 				conf.GenerateUDID = v
 			} else if parts[0] == "force_fsync" {
 				v, _ := strconv.Atoi(parts[1])
+				if v != 0 && v != 1 {
+					fmt.Println(DateStampAsString(), "Config ERROR: generate_udid must be 0 or 1")
+					os.Exit(1)
+				} 
 				conf.ForceFsync = v
 			}
 		}
