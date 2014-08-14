@@ -79,6 +79,7 @@ Note that although they are not yet configurable, the log event and pending writ
 - Complete stats section (CPU usage, current RPS, uptime, connections handled, etc)
 - Test modificaitons to specific sysctl kernel values to verify any potential improvments in performance
 - Perform an official stress test along with results which include RPS, logfile size, CPU usage, etc.
+- Properly comment and document the code
 
 
 ## Acknowledgements 
