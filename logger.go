@@ -51,17 +51,19 @@ type Config struct {
 }
 
 type Stats struct {
-	ProcessStartTime       int64
-	TotalRequestsServed    uint64
-	CpuStats               map[string]uint64
-	CurrentLoad            float32
-	CurrentProcessMemUsage int32
-	CurrMaxRequestSize     int32
-	CurrMinRequestSize     int32
-	Timer                  *time.Timer
-	PrevRequestsServed     uint64
-	RPS                    int32
-	CpuUsagePercentage		float32
+	ProcessStartTime       int64 	`json:"omitempty"`
+	CurrentProcessUptime	int64	`json:"current_uptime_seconds"`
+	TotalRequestsServed    uint64 	`json:"total_requests_served"`
+	NumWorkers 				int 	`json:"num_log_workers"`
+	CpuStats               map[string]uint64 `json:"omitempty"`
+	CurrentLoad            float32 `json:"curr_cpu_load"`
+	CurrentProcessMemUsage int32 	`json:"curr_process_mem_usage"`
+	CurrMaxRequestSize     int32	`json:"max_request_size"`
+	CurrMinRequestSize     int32	`json:"min_request_size"`
+	Timer                  *time.Timer `json:"omitempty"`
+	PrevRequestsServed     uint64   `json:"omitempty"`
+	RPS                    int32    `json:"rps"`
+	CpuUsagePercentage		float32 `json:"cpu_usage"`
 }
 
 type LogEntry []byte
@@ -607,6 +609,7 @@ func statsHandler(name string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
 
+		/*
 		stats := map[string]interface{}{
 			"status":                 "OK",
 			"total_requests_served":  stats.TotalRequestsServed,
@@ -619,7 +622,10 @@ func statsHandler(name string) http.Handler {
 			"curr_max_request_size":  stats.CurrMaxRequestSize,
 			"curr_min_request_size":  stats.CurrMinRequestSize,
 		}
+		*/
 
+		stats.CurrentProcessUptime = time.Now().Unix() - stats.ProcessStartTime
+		stats.NumWorkers = conf.NumWorkers
 		data, err := json.Marshal(stats)
 
 		w.Header().Set("Cache-control", "public, max-age=0")
