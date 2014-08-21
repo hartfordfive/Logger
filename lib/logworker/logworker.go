@@ -6,6 +6,11 @@ import (
 	"time"
 	"strconv"
 	"fmt"
+	"sync"
+	"runtime"
+	"sync/atomic"
+	"strings"
+	"github.com/marpaia/graphite-golang"
 )
 
 type Config struct {
@@ -22,6 +27,9 @@ type Config struct {
 	CurrentLogFileHandle *os.File
 	CurrentLogFile	    string
 	ForceFsync      int
+	EnableGraphite int
+	GraphiteHost string
+	GraphitePort int
 }
 
 type LogWorker struct {
@@ -47,6 +55,8 @@ type Stats struct {
 	PrevRequestsServed     uint64   `json:"omitempty"`
 	RPS                    int32    `json:"rps"`
 	CpuUsagePercentage		float32 `json:"cpu_usage"`
+	GraphiteConn		*graphite.Graphite
+	GraphiteConnError	bool
 }
 
 type LogEntry []byte
@@ -54,14 +64,28 @@ type LogEntry []byte
 
 var (
 	now          = time.Now()
-	channel      = make(chan []byte, 10000) // 6144-1 number of log events can be in the channel before it blocks
-	pending_write_channel      = make(chan LogEntry, 10000) // 10000-1 number of pending write events can be in the channel before it blocks
+	//channel      = make(chan []byte, 10000) // 6144-1 number of log events can be in the channel before it blocks
+	//pending_write_channel      = make(chan LogEntry, 10000) // 10000-1 number of pending write events can be in the channel before it blocks
 	Debug = 0
 	ByteBufferCapacity int64
+	mutexRPS = &sync.Mutex{}
+	mutexIncr = &sync.Mutex{}
+	mutexWrite = &sync.Mutex{}
+	mutexCreate = &sync.Mutex{}
+	LoggerConfig = NewConfig()
+	LoggerStats = NewStats(LoggerConfig)
 )
 
+func NewStats(c *Config) *Stats {
 
-func NewStats() (s *Stats) {
+	if c.EnableGraphite == 1 {
+		fmt.Println("Graphite Enabled!")
+		gr, err := graphite.NewGraphite(c.GraphiteHost, c.GraphitePort)
+		if err != nil {
+			return &Stats{ProcessStartTime: time.Now().Unix(), GraphiteConnError: true}
+		}
+		return &Stats{ProcessStartTime: time.Now().Unix(), GraphiteConn: gr}
+	}
 	return &Stats{ProcessStartTime: time.Now().Unix()}
 }
 
@@ -69,7 +93,7 @@ func NewConfig() (c *Config) {
 	return &Config{}
 }
 
-func Log(event []byte) {
+func Log(event []byte, channel chan []byte) {
 	select {
 	case channel <- event:
 	case <-time.After(5 * time.Second):
@@ -86,7 +110,7 @@ func NewLogWorker(id int, logdir string, bufferCapacity int64) (w *LogWorker) {
 	}
 }
 
-func (w *LogWorker) ListenForLogEvent(channel chan []byte, pending_write_channel chan LogEntry) {
+func (w *LogWorker) ListenForLogEvent(channel chan []byte, pending_write_channel chan LogEntry, stats *Stats) {
 	for {
 		event := <-channel
 		length := len(event)
@@ -127,7 +151,7 @@ func (w *LogWorker) ListenForLogEvent(channel chan []byte, pending_write_channel
 
 		copy(w.buffer[w.position:], event)
 		w.position += length
-		w.UpdateStats()
+		w.UpdateStats(stats)
 	}
 }
 
@@ -139,6 +163,10 @@ func (w *LogWorker) UpdateRPS(stats *Stats) {
 		time.Sleep(1 * time.Second)
 		stats.RPS = int32(stats.TotalRequestsServed - stats.PrevRequestsServed)
 		mutexRPS.Unlock()
+		if LoggerConfig.EnableGraphite == 1 {
+			fmt.Println(LoggerStats)
+			//LoggerStats.GraphiteConn.SimpleSend("logger.metrics.rps", strconv.Itoa(int(stats.RPS)))
+		}
 		runtime.Gosched()
 	}
 
@@ -149,11 +177,11 @@ func (w *LogWorker) UpdateStats(stats *Stats) {
 	mutexIncr.Lock()
 	atomic.AddUint64(&stats.TotalRequestsServed, 1)
 
-	if w.currMaxRequestSize > stats.CurrMaxRequestSize {
-		stats.CurrMaxRequestSize = w.currMaxRequestSize
+	if w.CurrMaxRequestSize > stats.CurrMaxRequestSize {
+		stats.CurrMaxRequestSize = w.CurrMaxRequestSize
 	}
-	if stats.CurrMinRequestSize == 0 || w.currMinRequestSize < stats.CurrMinRequestSize {
-		stats.CurrMinRequestSize = w.currMinRequestSize
+	if stats.CurrMinRequestSize == 0 || w.CurrMinRequestSize < stats.CurrMinRequestSize {
+		stats.CurrMinRequestSize = w.CurrMinRequestSize
 	}
 
 	mutexIncr.Unlock()
@@ -174,21 +202,21 @@ func (w *LogWorker) Save(pending_write_channel chan LogEntry) {
 }
 
 
-func FileWritter(pending_write_channel chan logworker.LogEntry) {
+func FileWritter(pending_write_channel chan LogEntry, conf *Config) {
 
 	for {
 
-		lfn := utils.GetLogfileName()
+		lfn := GetLogfileName()
 		if lfn != conf.CurrentLogFile {
 
 			//defer currentLogFileHandle.Close()
 			mutexCreate.Lock()
-			if conf.Debug == 1 {
-				fmt.Println(utils.DateStampAsString(), "Could not open file to append data, attempting to create file..")
+			if Debug == 1 {
+				fmt.Println(DateStampAsString(), "Could not open file to append data, attempting to create file..")
 			}
-			fh, err := os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + utils.GetLogfileName())
+			fh, err := os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + GetLogfileName())
 			if err != nil {
-				fmt.Println(utils.DateStampAsString(), "ERROR: Worker could not open new log file!")
+				fmt.Println(DateStampAsString(), "ERROR: Worker could not open new log file!")
 				panic(err)
 			}
 
@@ -207,15 +235,15 @@ func FileWritter(pending_write_channel chan logworker.LogEntry) {
 		
 		if conf.Debug == 1 {
 		   if err != nil {
-		      fmt.Println(utils.DateStampAsString(), "Write error:", err)
+		      fmt.Println(DateStampAsString(), "Write error:", err)
 		   }
-           fmt.Println(utils.DateStampAsString(), "Wrote ", nb , " bytes to ", conf.CurrentLogFile)
+           fmt.Println(DateStampAsString(), "Wrote ", nb , " bytes to ", conf.CurrentLogFile)
         }
 
 		if conf.ForceFsync == 1 && err == nil {
 		   sync_err := conf.CurrentLogFileHandle.Sync()
 		   if sync_err != nil && conf.Debug == 1 {
-		      fmt.Println(utils.DateStampAsString(), "Sync ERROR:", sync_err)
+		      fmt.Println(DateStampAsString(), "Sync ERROR:", sync_err)
 		   }
 		} 
 

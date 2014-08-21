@@ -14,7 +14,6 @@ import (
 	"time"
 )
 
-var Debug int = 1
 
 func GetMonthAsIntString(m string) string {
 
@@ -52,12 +51,12 @@ func GetLogfileName() string {
 	return strconv.Itoa(y) + "-" + GetMonthAsIntString(m.String()) + "-" + strconv.Itoa(d) + "-" + strconv.Itoa(time.Now().Hour()) + "00.txt"
 }
 
-func LoadConfig(filename string, conf *logworker.Config) error {
+func LoadConfig(filename string, conf *Config) error {
 
 	valid := map[string]int{
 		"debug": 1, "logger_address": 1, "log_directory": 1, "num_workers": 1, "generate_udid": 1,
 		"buffer_capacity": 1, "enable_ssl": 1, "enable_stats": 1, "stats_address": 1,
-		"cookie_domain": 1, "dump_to_graphite": 1, "graphite_host": 1, "graphite_port": 1, "force_fsync": 1,
+		"cookie_domain": 1, "enable_graphite": 1, "graphite_host": 1, "graphite_port": 1, "force_fsync": 1,
 	}
 
 	buf := bytes.NewBuffer(nil)
@@ -134,6 +133,22 @@ func LoadConfig(filename string, conf *logworker.Config) error {
 					os.Exit(1)
 				} 
 				conf.ForceFsync = v
+			} else if parts[0] == "enable_graphite" {
+				v, _ := strconv.Atoi(parts[1])
+				if v != 0 && v != 1 {
+					fmt.Println(DateStampAsString(), "Config ERROR: enable_graphite must be 0 or 1")
+					os.Exit(1)
+				} 
+				conf.EnableGraphite = v
+			} else if parts[0] == "graphite_host" {
+				conf.GraphiteHost = parts[1]
+			} else if parts[0] == "graphite_port" {
+				v, _ := strconv.Atoi(parts[1])
+				if v <= 0 || v > 65563 {
+					fmt.Println(DateStampAsString(), "Config ERROR: graphite_port must a valid port number")
+					os.Exit(1)
+				} 
+				conf.GraphitePort = v
 			}
 		}
 	}
@@ -169,7 +184,7 @@ func GetUuidCookie(r *http.Request) string {
 	return uuid
 }
 
-func UpdateCpuUsageStats(stats *logworker.Stats) {
+func UpdateCpuUsageStats(stats *Stats) {
 
 	var prev_cpu_total uint64
 	var prev_cpu_idle	uint64

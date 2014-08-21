@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"strconv"
+	//"strconv"
 	"strings"
-	"sync"
+	//"sync"
 	//"sync/atomic"
 	"time"
 	"github.com/mindgeekoss/logger/lib/logworker"
@@ -22,21 +22,21 @@ const (
 	PNGPX_B64 string = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGP6zwAAAgcBApocMXEAAAAASUVORK5CYII="
 )
 
-var conf = NewConfig()
-var stats = NewStats()
+//var conf = logworker.NewConfig()
+//var stats = logworker.NewStats(conf)
 
 var (
 	now          = time.Now()
-	//channel      = make(chan []byte, 10000) // 6144-1 number of log events can be in the channel before it blocks
-	//pending_write_channel      = make(chan logworker.LogEntry, 10000) // 10000-1 number of pending write events can be in the channel before it blocks
+	channel      = make(chan []byte, 10000) // 6144-1 number of log events can be in the channel before it blocks
+	pending_write_channel      = make(chan logworker.LogEntry, 10000) // 10000-1 number of pending write events can be in the channel before it blocks
 	address      = flag.String("a", "0.0.0.0:80", "Address to listen on for logging")
 	addressStats = flag.String("r", "0.0.0.0:88", "Address to listen on for stats")
 )
 
 var debug, buffer_capacity, num_workers, enable_stats, enable_ssl int
 var logdir, configFile string
-var workers []*LogWorker
-var mutexWrite, mutexCreate, mutexIncr, mutexRPS *sync.Mutex
+var workers []*logworker.LogWorker
+//var mutexWrite, mutexCreate, mutexIncr, mutexRPS *sync.Mutex
 
 func init() {
 
@@ -61,80 +61,71 @@ func main() {
 
 	// Read the config file
 	if configFile != "" {
-		fmt.Println(utils.DateStampAsString(), "Loading config!")
-		err := utils.LoadConfig(configFile, conf)
+		fmt.Println(logworker.DateStampAsString(), "Loading config!")
+		err := logworker.LoadConfig(configFile, logworker.LoggerConfig)
 		if err != nil {
 			panic("ERROR: Please verify that configuration file is valid")
 		}
 	} else {
-		conf.LoggerAddress = *address
-		conf.Debug = debug
-		conf.LogDir = logdir
-		conf.NumWorkers = num_workers
-		conf.ByteBufferCapacity = buffer_capacity
-		conf.EnableSSL = enable_ssl
-		conf.EnableStats = enable_stats
-		conf.StatsAddress = *addressStats
+		logworker.LoggerConfig.LoggerAddress = *address
+		logworker.LoggerConfig.Debug = debug
+		logworker.LoggerConfig.LogDir = logdir
+		logworker.LoggerConfig.NumWorkers = num_workers
+		logworker.LoggerConfig.ByteBufferCapacity = buffer_capacity
+		logworker.LoggerConfig.EnableSSL = enable_ssl
+		logworker.LoggerConfig.EnableStats = enable_stats
+		logworker.LoggerConfig.StatsAddress = *addressStats
 	}
 
 	// Ensure that the log directory
-	if _, err := os.Stat(conf.LogDir); err != nil {
+	if _, err := os.Stat(logworker.LoggerConfig.LogDir); err != nil {
 		if os.IsNotExist(err) {
-			err = os.Mkdir(conf.LogDir, 0755)
+			err = os.Mkdir(logworker.LoggerConfig.LogDir, 0755)
 		}
 		if err != nil {
-			fmt.Println(utils.DateStampAsString(), "ERROR: Could not created directory: ", conf.LogDir)
+			fmt.Println(logworker.DateStampAsString(), "ERROR: Could not created directory: ", logworker.LoggerConfig.LogDir)
 			os.Exit(0)
 		}
 	}
 
-	fmt.Println(utils.ateStampAsString(), "Starting Logger on ", conf.LoggerAddress)
-
-	mutexWrite = &sync.Mutex{}
-	mutexCreate = &sync.Mutex{}
-	mutexIncr = &sync.Mutex{}
-	mutexRPS = &sync.Mutex{}
+	fmt.Println(logworker.DateStampAsString(), "Starting Logger on ", logworker.LoggerConfig.LoggerAddress)
 
 	// Start the thread to collect the CPU stats every 5 seconds
 	//go updateCpuUsageStats()
 
 	
-	fh, err := os.OpenFile(strings.TrimRight(conf.LogDir, "/")+"/"+utils.GetLogfileName(), os.O_RDWR|os.O_APPEND, 0660)
+	fh, err := os.OpenFile(strings.TrimRight(logworker.LoggerConfig.LogDir, "/")+"/"+logworker.GetLogfileName(), os.O_RDWR|os.O_APPEND, 0660)
 	if err != nil {
-		if conf.Debug == 1 {
+		if logworker.LoggerConfig.Debug == 1 {
 			fmt.Println("\tCould not open file to append data, attempting to create file..")
 		}
-		fh, err = os.Create(strings.TrimRight(conf.LogDir, "/") + "/" + utils.GetLogfileName())
+		fh, err = os.Create(strings.TrimRight(logworker.LoggerConfig.LogDir, "/") + "/" + logworker.GetLogfileName())
 		if err != nil {
-			fmt.Println(utils.DateStampAsString(), "Worker could not open log file! :")
+			fmt.Println(logworker.DateStampAsString(), "Worker could not open log file! :")
 			panic(err)
 		}
 
 	}
-	conf.CurrentLogFileHandle = fh
-	defer conf.CurrentLogFileHandle.Close()
-	conf.CurrentLogFile = utils.GetLogfileName()
-
-	workers = make([]*LogWorker, conf.NumWorkers)
+	logworker.LoggerConfig.CurrentLogFileHandle = fh
+	defer logworker.LoggerConfig.CurrentLogFileHandle.Close()
+	logworker.LoggerConfig.CurrentLogFile = logworker.GetLogfileName()
+	workers = make([]*logworker.LogWorker, logworker.LoggerConfig.NumWorkers)
 	
 
-	go logworker.FileWritter(pending_write_channel)
+	go logworker.FileWritter(pending_write_channel, logworker.LoggerConfig)
 
-	for i := 0; i < conf.NumWorkers; i++ {
-
-		if conf.Debug == 1 {
-			fmt.Println(utils.DateStampAsString(), "Spawning log worker ", i)
+	for i := 0; i < logworker.LoggerConfig.NumWorkers; i++ {
+		if logworker.LoggerConfig.Debug == 1 {
+			fmt.Println(logworker.DateStampAsString(), "Spawning log worker ", i)
 		}
-		workers[i] = NewLogWorker(i, conf.LogDir, conf.ByteBufferCapacity)
-
-		go workers[i].ListenForLogEvent(channel, pending_write_channel)
-		//go FileWritter(pending_write_channel)
-		go workers[i].UpdateRPS()
+		workers[i] = logworker.NewLogWorker(i, logworker.LoggerConfig.LogDir, int64(logworker.LoggerConfig.ByteBufferCapacity))
+		go workers[i].ListenForLogEvent(channel, pending_write_channel, logworker.LoggerStats)
+		go workers[i].UpdateRPS(logworker.LoggerStats)
 	}
 
 	gracehttp.Serve(
-		&http.Server{Addr: conf.LoggerAddress, Handler: newHandler("logging_handler")},
-		&http.Server{Addr: conf.StatsAddress, Handler: statsHandler("stats_handler")},
+		&http.Server{Addr: logworker.LoggerConfig.LoggerAddress, Handler: newHandler("logging_handler")},
+		&http.Server{Addr: logworker.LoggerConfig.StatsAddress, Handler: statsHandler("stats_handler")},
 	)
 }
 
@@ -157,18 +148,18 @@ func newHandler(name string) http.Handler {
 
 		// If the _golog_uuid cookie is not set, then create the uuid and set it
 		var udid string
-		if conf.GenerateUDID == 1 {
-			udid := utils.GetUuidCookie(r)
+		if logworker.LoggerConfig.GenerateUDID == 1 {
+			udid := logworker.GetUuidCookie(r)
 			if udid == "" {
 				y, m, d := time.Now().Date()
 				expiryTime := time.Date(y, m, d+365, 0, 0, 0, 0, time.UTC)
-				w.Header().Set("Set-Cookie", "udid="+utils.GetUDID()+"; Domain="+conf.CookieDomain+"; Path=/; Expires="+expiryTime.Format(time.RFC1123))
+				w.Header().Set("Set-Cookie", "udid="+logworker.GetUDID()+"; Domain="+logworker.LoggerConfig.CookieDomain+"; Path=/; Expires="+expiryTime.Format(time.RFC1123))
 			}
 		}
 
 		ts := int(time.Now().Unix())
 		str := fmt.Sprintf("%d ~ %s ~ %s ~ %s ~ %s ~ %s ~ %s ~ %s ~ %s ~ %s ~ %s ~ %s ~ %s\n", ts, app_id, category, action, label, clientIP, requestIP, udid, suid, value, referer, log_ua, data)
-		Log([]byte(str))
+		logworker.Log([]byte(str), channel)
 
 		// Finally, return the tracking pixel and exit the request.
 		w.Header().Set("Cache-control", "public, max-age=0")
@@ -200,9 +191,9 @@ func statsHandler(name string) http.Handler {
 		}
 		*/
 
-		stats.CurrentProcessUptime = time.Now().Unix() - stats.ProcessStartTime
-		stats.NumWorkers = conf.NumWorkers
-		data, err := json.Marshal(stats)
+		logworker.LoggerStats.CurrentProcessUptime = time.Now().Unix() - logworker.LoggerStats.ProcessStartTime
+		logworker.LoggerStats.NumWorkers = logworker.LoggerConfig.NumWorkers
+		data, err := json.Marshal(logworker.LoggerStats)
 
 		w.Header().Set("Cache-control", "public, max-age=0")
 		w.Header().Set("Content-Type", "application/json")
