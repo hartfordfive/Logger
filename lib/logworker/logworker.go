@@ -251,3 +251,15 @@ func FileWritter(pending_write_channel chan LogEntry, conf *Config) {
 		runtime.Gosched()
 	}
 }
+
+
+func PushStatsToGraphite(conf *Config, stats *Stats) {
+	for {
+		if Debug == 1{
+			fmt.Println(DateStampAsString(), "Pushing stats to graphite..")
+		}
+		stats.GraphiteConn.SimpleSend("logger_stats.graphite_loaded", "1")
+		time.Sleep(60 * time.Second)
+
+	}
+}

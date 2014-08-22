@@ -16,14 +16,15 @@ import (
 	//"sync/atomic"
 	"time"
 	"github.com/mindgeekoss/logger/lib/logworker"
+	"github.com/marpaia/graphite-golang"
 )
 
 const (
 	PNGPX_B64 string = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGP6zwAAAgcBApocMXEAAAAASUVORK5CYII="
 )
 
-//var conf = logworker.NewConfig()
-//var stats = logworker.NewStats(conf)
+var logworker_config = logworker.NewConfig()
+var logworker_stats = logworker.NewStats(logworker_config)
 
 var (
 	now          = time.Now()
@@ -36,11 +37,6 @@ var (
 var debug, buffer_capacity, num_workers, enable_stats, enable_ssl int
 var logdir, configFile string
 var workers []*logworker.LogWorker
-//var mutexWrite, mutexCreate, mutexIncr, mutexRPS *sync.Mutex
-
-func init() {
-
-}
 
 
 /****************************************************************/
@@ -62,70 +58,79 @@ func main() {
 	// Read the config file
 	if configFile != "" {
 		fmt.Println(logworker.DateStampAsString(), "Loading config!")
-		err := logworker.LoadConfig(configFile, logworker.LoggerConfig)
+		err := logworker.LoadConfig(configFile, logworker_config)
 		if err != nil {
 			panic("ERROR: Please verify that configuration file is valid")
 		}
 	} else {
-		logworker.LoggerConfig.LoggerAddress = *address
-		logworker.LoggerConfig.Debug = debug
-		logworker.LoggerConfig.LogDir = logdir
-		logworker.LoggerConfig.NumWorkers = num_workers
-		logworker.LoggerConfig.ByteBufferCapacity = buffer_capacity
-		logworker.LoggerConfig.EnableSSL = enable_ssl
-		logworker.LoggerConfig.EnableStats = enable_stats
-		logworker.LoggerConfig.StatsAddress = *addressStats
+		logworker_config.LoggerAddress = *address
+		logworker_config.Debug = debug
+		logworker_config.LogDir = logdir
+		logworker_config.NumWorkers = num_workers
+		logworker_config.ByteBufferCapacity = buffer_capacity
+		logworker_config.EnableSSL = enable_ssl
+		logworker_config.EnableStats = enable_stats
+		logworker_config.StatsAddress = *addressStats
 	}
 
+	if logworker_config.EnableGraphite == 1 {
+		logworker_stats.GraphiteConn = graphite.NewGraphiteNop(logworker_config.GraphiteHost, logworker_config.GraphitePort)
+	}
+
+
 	// Ensure that the log directory
-	if _, err := os.Stat(logworker.LoggerConfig.LogDir); err != nil {
+	if _, err := os.Stat(logworker_config.LogDir); err != nil {
 		if os.IsNotExist(err) {
-			err = os.Mkdir(logworker.LoggerConfig.LogDir, 0755)
+			err = os.Mkdir(logworker_config.LogDir, 0755)
 		}
 		if err != nil {
-			fmt.Println(logworker.DateStampAsString(), "ERROR: Could not created directory: ", logworker.LoggerConfig.LogDir)
+			fmt.Println(logworker.DateStampAsString(), "ERROR: Could not created directory: ", logworker_config.LogDir)
 			os.Exit(0)
 		}
 	}
 
-	fmt.Println(logworker.DateStampAsString(), "Starting Logger on ", logworker.LoggerConfig.LoggerAddress)
+	fmt.Println(logworker.DateStampAsString(), "Starting Logger on ", logworker_config.LoggerAddress)
 
 	// Start the thread to collect the CPU stats every 5 seconds
 	//go updateCpuUsageStats()
 
+	// Push stats directly to graphite
+	// Causing error, need to determine why
+	//go logworker.PushStatsToGraphite(logworker_config, logworker_stats)
+
 	
-	fh, err := os.OpenFile(strings.TrimRight(logworker.LoggerConfig.LogDir, "/")+"/"+logworker.GetLogfileName(), os.O_RDWR|os.O_APPEND, 0660)
+	fh, err := os.OpenFile(strings.TrimRight(logworker_config.LogDir, "/")+"/"+logworker.GetLogfileName(), os.O_RDWR|os.O_APPEND, 0660)
 	if err != nil {
-		if logworker.LoggerConfig.Debug == 1 {
+		if logworker_config.Debug == 1 {
 			fmt.Println("\tCould not open file to append data, attempting to create file..")
 		}
-		fh, err = os.Create(strings.TrimRight(logworker.LoggerConfig.LogDir, "/") + "/" + logworker.GetLogfileName())
+		fh, err = os.Create(strings.TrimRight(logworker_config.LogDir, "/") + "/" + logworker.GetLogfileName())
 		if err != nil {
 			fmt.Println(logworker.DateStampAsString(), "Worker could not open log file! :")
 			panic(err)
 		}
 
 	}
-	logworker.LoggerConfig.CurrentLogFileHandle = fh
-	defer logworker.LoggerConfig.CurrentLogFileHandle.Close()
-	logworker.LoggerConfig.CurrentLogFile = logworker.GetLogfileName()
-	workers = make([]*logworker.LogWorker, logworker.LoggerConfig.NumWorkers)
+	logworker_config.CurrentLogFileHandle = fh
+	defer logworker_config.CurrentLogFileHandle.Close()
+	logworker_config.CurrentLogFile = logworker.GetLogfileName()
+	workers = make([]*logworker.LogWorker, logworker_config.NumWorkers)
 	
 
-	go logworker.FileWritter(pending_write_channel, logworker.LoggerConfig)
+	go logworker.FileWritter(pending_write_channel, logworker_config)
 
 	for i := 0; i < logworker.LoggerConfig.NumWorkers; i++ {
 		if logworker.LoggerConfig.Debug == 1 {
 			fmt.Println(logworker.DateStampAsString(), "Spawning log worker ", i)
 		}
-		workers[i] = logworker.NewLogWorker(i, logworker.LoggerConfig.LogDir, int64(logworker.LoggerConfig.ByteBufferCapacity))
+		workers[i] = logworker.NewLogWorker(i, logworker_config.LogDir, int64(logworker_config.ByteBufferCapacity))
 		go workers[i].ListenForLogEvent(channel, pending_write_channel, logworker.LoggerStats)
-		go workers[i].UpdateRPS(logworker.LoggerStats)
+		go workers[i].UpdateRPS(logworker_stats)
 	}
 
 	gracehttp.Serve(
-		&http.Server{Addr: logworker.LoggerConfig.LoggerAddress, Handler: newHandler("logging_handler")},
-		&http.Server{Addr: logworker.LoggerConfig.StatsAddress, Handler: statsHandler("stats_handler")},
+		&http.Server{Addr: logworker_config.LoggerAddress, Handler: newHandler("logging_handler")},
+		&http.Server{Addr: logworker_config.StatsAddress, Handler: statsHandler("stats_handler")},
 	)
 }
 
@@ -148,12 +153,12 @@ func newHandler(name string) http.Handler {
 
 		// If the _golog_uuid cookie is not set, then create the uuid and set it
 		var udid string
-		if logworker.LoggerConfig.GenerateUDID == 1 {
+		if logworker_config.GenerateUDID == 1 {
 			udid := logworker.GetUuidCookie(r)
 			if udid == "" {
 				y, m, d := time.Now().Date()
 				expiryTime := time.Date(y, m, d+365, 0, 0, 0, 0, time.UTC)
-				w.Header().Set("Set-Cookie", "udid="+logworker.GetUDID()+"; Domain="+logworker.LoggerConfig.CookieDomain+"; Path=/; Expires="+expiryTime.Format(time.RFC1123))
+				w.Header().Set("Set-Cookie", "udid="+logworker.GetUDID()+"; Domain="+logworker_config.CookieDomain+"; Path=/; Expires="+expiryTime.Format(time.RFC1123))
 			}
 		}
 
