@@ -38,6 +38,7 @@ A simple Go based logging tool for HTTP requests
 
 `force_fsync=[0|1]`:
 	- explicitly issue an fsync when writting data to file (default = 0)
+	- 
 `enable_ssl=[0|1]`:
 	- enables https mode (not yet implemented)
 
@@ -74,7 +75,8 @@ Note that although they are not yet configurable, the log event and pending writ
 ## TODO / Future Features:
 
 - Implement SSL feature for both logging and stats reporting
-- Implement reporting of realtime data to Graphite
+- Enable dumping data to Graphite
+- Enable dumping data to ElasticSearch
 - Cleanup the code by sperating utility functions and structs into their own seperate modules
 - Complete stats section (CPU usage, current RPS, uptime, connections handled, etc)
 - Test modificaitons to specific sysctl kernel values to verify any potential improvments in performance
