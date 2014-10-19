@@ -10,7 +10,7 @@ A simple Go based logging tool for HTTP requests
 ##Installation
 
 - `$ sudo apt-get install golang`
-- `$ git clone https://github.com/MindGeekOSS/Logger.git`
+- `$ git clone https://github.com/hartfordfive/Logger.git`
 - `$ go get github.com/facebookgo/grace`
 - `$ go build logger.go`
 
